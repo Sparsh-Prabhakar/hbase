@@ -423,6 +423,7 @@ Shell.load_command_group(
   full_name: 'DATA MANIPULATION COMMANDS',
   commands: %w[
     count
+    jointable
     delete
     deleteall
     get

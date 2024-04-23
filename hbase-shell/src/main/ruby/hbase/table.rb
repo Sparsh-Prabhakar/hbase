@@ -488,6 +488,133 @@ EOF
       (block_given? ? [count, is_stale] : res)
     end
 
+
+    def _get_internal_join(row, *args)
+      get = org.apache.hadoop.hbase.client.Get.new(row.to_s.to_java_bytes)
+      maxlength = -1
+      count = 0
+      @converters.clear
+
+      # Normalize args
+      args = args.first if args.first.is_a?(Hash)
+      if args.is_a?(String) || args.is_a?(Array)
+        columns = [args].flatten.compact
+        args = { COLUMNS => columns }
+      end
+
+      #
+      # Parse arguments
+      #
+      unless args.is_a?(Hash)
+        raise ArgumentError, "Failed parse of #{args.inspect}, #{args.class}"
+      end
+
+      # Get maxlength parameter if passed
+      maxlength = args.delete(MAXLENGTH) if args[MAXLENGTH]
+      filter = args.delete(FILTER) if args[FILTER]
+      attributes = args[ATTRIBUTES]
+      authorizations = args[AUTHORIZATIONS]
+      consistency = args.delete(CONSISTENCY) if args[CONSISTENCY]
+      replicaId = args.delete(REGION_REPLICA_ID) if args[REGION_REPLICA_ID]
+      converter = args.delete(FORMATTER) || nil
+      converter_class = args.delete(FORMATTER_CLASS) || 'org.apache.hadoop.hbase.util.Bytes'
+      unless args.empty?
+        columns = args[COLUMN] || args[COLUMNS]
+        vers = if args[VERSIONS]
+                 args[VERSIONS]
+               else
+                 1
+               end
+        if columns
+          # Normalize types, convert string to an array of strings
+          columns = [columns] if columns.is_a?(String)
+
+          # At this point it is either an array or some unsupported stuff
+          unless columns.is_a?(Array)
+            raise ArgumentError, "Failed parse column argument type #{args.inspect}, #{args.class}"
+          end
+
+          # Get each column name and add it to the filter
+          columns.each do |column|
+            family, qualifier = parse_column_name(column.to_s)
+            if qualifier
+              get.addColumn(family, qualifier)
+            else
+              get.addFamily(family)
+            end
+          end
+
+          # Additional params
+          get.readVersions(vers)
+          get.setTimestamp(args[TIMESTAMP]) if args[TIMESTAMP]
+          get.setTimeRange(args[TIMERANGE][0], args[TIMERANGE][1]) if args[TIMERANGE]
+        else
+          if attributes
+            set_attributes(get, attributes)
+          elsif authorizations
+            set_authorizations(get, authorizations)
+          else
+            # May have passed TIMESTAMP and row only; wants all columns from ts.
+            unless ts = args[TIMESTAMP] || tr = args[TIMERANGE]
+              raise ArgumentError, "Failed parse of #{args.inspect}, #{args.class}"
+            end
+          end
+
+          get.readVersions(vers)
+          # Set the timestamp/timerange
+          get.setTimestamp(ts.to_i) if args[TIMESTAMP]
+          get.setTimeRange(args[TIMERANGE][0], args[TIMERANGE][1]) if args[TIMERANGE]
+        end
+        set_attributes(get, attributes) if attributes
+        set_authorizations(get, authorizations) if authorizations
+      end
+
+      if filter.class == String
+        get.setFilter(
+          org.apache.hadoop.hbase.filter.ParseFilter.new.parseFilterString(filter.to_java_bytes)
+        )
+      else
+        get.setFilter(filter)
+      end
+
+      get.setConsistency(org.apache.hadoop.hbase.client.Consistency.valueOf(consistency)) if consistency
+      get.setReplicaId(replicaId) if replicaId
+
+      # Call hbase for the results
+      result = @table.get(get)
+      return nil if result.isEmpty
+
+      # Get stale info from results
+      is_stale = result.isStale
+      count += 1
+
+      # Print out results.  Result can be Cell or RowResult.
+      res = {}
+      result.listCells.each do |c|
+        # Get the family and qualifier of the cell without escaping non-printable characters. It is crucial that
+        # column is constructed in this consistent way to that it can be used as a key.
+        family_bytes =  org.apache.hadoop.hbase.util.Bytes.copy(c.getFamilyArray, c.getFamilyOffset, c.getFamilyLength)
+        qualifier_bytes =  org.apache.hadoop.hbase.util.Bytes.copy(c.getQualifierArray, c.getQualifierOffset, c.getQualifierLength)
+        column = "#{family_bytes}:#{qualifier_bytes}"
+
+        value = to_string_val(column, c, maxlength, converter_class, converter)
+
+        # Use the FORMATTER to determine how column is printed
+        family = convert_bytes(family_bytes, converter_class, converter)
+        qualifier = convert_bytes(qualifier_bytes, converter_class, converter)
+        formatted_column = "#{family}:#{qualifier}"
+
+        if block_given?
+          yield(formatted_column, value)
+        else
+          res[formatted_column] = value
+        end
+      end
+
+      # If block given, we've yielded all the results, otherwise just return them
+      (block_given? ? [count, is_stale] : res)
+    end
+
     #----------------------------------------------------------------------------------------------
     # Fetches and decodes a counter value from hbase
     def _get_counter_internal(row, column)
@@ -652,6 +779,58 @@ EOF
       (block_given? ? [count, is_stale] : res)
     end
 
+    def _scan_internal_join(args = {}, scan = nil)
+      raise(ArgumentError, 'Args should be a Hash') unless args.is_a?(Hash)
+      raise(ArgumentError, 'Scan argument should be org.apache.hadoop.hbase.client.Scan') \
+        unless scan.nil? || scan.is_a?(org.apache.hadoop.hbase.client.Scan)
+
+      maxlength = args.delete('MAXLENGTH') || -1
+      converter = args.delete(FORMATTER) || nil
+      converter_class = args.delete(FORMATTER_CLASS) || 'org.apache.hadoop.hbase.util.Bytes'
+      count = 0
+      res = {}
+
+      # Start the scanner
+      scan = scan.nil? ? _hash_to_scan(args) : scan
+      scanner = @table.getScanner(scan)
+      iter = scanner.iterator
+
+      # Iterate results
+      while iter.hasNext
+        row = iter.next
+        key = convert_bytes(row.getRow, nil, converter)
+        is_stale |= row.isStale
+
+        row.listCells.each do |c|
+          # Get the family and qualifier of the cell without escaping non-printable characters. It is crucial that
+          # column is constructed in this consistent way to that it can be used as a key.
+          family_bytes =  org.apache.hadoop.hbase.util.Bytes.copy(c.getFamilyArray, c.getFamilyOffset, c.getFamilyLength)
+          qualifier_bytes =  org.apache.hadoop.hbase.util.Bytes.copy(c.getQualifierArray, c.getQualifierOffset, c.getQualifierLength)
+          column = "#{family_bytes}:#{qualifier_bytes}"
+
+          cell = to_string_val(column, c, maxlength, converter_class, converter)
+
+          # Use the FORMATTER to determine how column is printed
+          family = convert_bytes(family_bytes, converter_class, converter)
+          qualifier = convert_bytes(qualifier_bytes, converter_class, converter)
+          formatted_column = "#{family}:#{qualifier}"
+
+          if block_given?
+            yield(key, "column=#{formatted_column}, #{cell}")
+          else
+            res[key] ||= {}
+            res[key] = cell
+          end
+        end
+        # One more row processed
+        count += 1
+      end
+
+      scanner.close
+      (block_given? ? [count, is_stale] : res)
+    end
+
+
     # Apply OperationAttributes to puts/scans/gets
     def set_attributes(oprattr, attributes)
       raise(ArgumentError, 'Attributes must be a Hash type') unless attributes.is_a?(Hash)
@@ -801,6 +980,35 @@ EOF
         val = "timestamp=#{toLocalDateTime(kv.getTimestamp)}, type=#{org.apache.hadoop.hbase.KeyValue::Type.codeToType(kv.getTypeByte)}"
       else
         val = "timestamp=#{toLocalDateTime(kv.getTimestamp)}, value=#{convert(column, kv, converter_class, converter)}"
+      end
+      maxlength != -1 ? val[0, maxlength] : val
+    end
+
+    def to_string_val(column, kv, maxlength = -1, converter_class = nil, converter = nil)
+      if is_meta_table?
+        if column == 'info:regioninfo' || column == 'info:splitA' || column == 'info:splitB' || \
+            column.start_with?('info:merge')
+          hri = org.apache.hadoop.hbase.client.RegionInfo.parseFromOrNull(kv.getValueArray,
+            kv.getValueOffset, kv.getValueLength)
+          return format('timestamp=%s, value=%s', toLocalDateTime(kv.getTimestamp),
+            hri.nil? ? '' : hri.toString)
+        end
+        if column == 'info:serverstartcode'
+          if kv.getValueLength > 0
+            str_val = org.apache.hadoop.hbase.util.Bytes.toLong(kv.getValueArray,
+                                                                kv.getValueOffset, kv.getValueLength)
+          else
+            str_val = org.apache.hadoop.hbase.util.Bytes.toStringBinary(kv.getValueArray,
+                                                                        kv.getValueOffset, kv.getValueLength)
+          end
+          return format('timestamp=%s, value=%s', toLocalDateTime(kv.getTimestamp), str_val)
+        end
+      end
+
+      if org.apache.hadoop.hbase.CellUtil.isDelete(kv)
+        val = "timestamp=#{toLocalDateTime(kv.getTimestamp)}, type=#{org.apache.hadoop.hbase.KeyValue::Type.codeToType(kv.getTypeByte)}"
+      else
+        val = convert(column, kv, converter_class, converter)
       end
       maxlength != -1 ? val[0, maxlength] : val
     end
