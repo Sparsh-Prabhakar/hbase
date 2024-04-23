@@ -25,3 +25,7 @@ linklint/
 **/*.log
 tmp
 **/.flattened-pom.xml
+conf/hbase-env.sh
+conf/hbase-site.xml
+file:/*
+.vscode

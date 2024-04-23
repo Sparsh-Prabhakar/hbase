@@ -80,9 +80,15 @@ EOF
 
       def join_tables(table1, table2, params={})
         # puts params
-        params1 = { "COLUMNS" => params["ON"]}
+        params1 = {}
+        params2 = {}
+        params1["COLUMNS"] = params["ON"]
+        params2["COLUMNS"] = params["ON"]
+        params1["FILTER"] = params["FILTER1"]
+        params2["FILTER"] = params["FILTER2"]
+        # params1 = { "COLUMNS" => params["ON"]}
         scan1 = table1._hash_to_scan(params1)
-        scan2 = table2._hash_to_scan(params1)
+        scan2 = table2._hash_to_scan(params2)
         puts "Scans created"
 
         @start_time = Time.now
