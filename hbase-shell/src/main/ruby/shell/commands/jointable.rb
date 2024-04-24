@@ -101,22 +101,23 @@ EOF
         puts "Scans created"
 
         @start_time = Time.now
-        # count, is_stale = table1._scan_internal_join(params1, scan1) do |row, cells|
-        #   puts row
-        #   puts cells
-
-        #   puts
-        #   puts
-        # end
-
-        matching = {}
 
         res1 = table1._scan_internal_join(params1, scan1)
         res2 = table2._scan_internal_join(params1, scan2)
 
-        # puts params1.inspect
-        # puts res1.inspect
+        join_output, all_columns = nested_loop_join(res1,res2,limit)
 
+        all_columns = all_columns.uniq
+
+        all_columns.unshift('ROW')
+
+        format_rows(join_output, all_columns)
+
+        @end_time = Time.now
+
+      end
+
+      def nested_loop_join(res1,res2,limit)
         join_output = {}
         all_columns = []
 
@@ -127,14 +128,9 @@ EOF
         res1.each do |key1,value1|
           res2.each do |key2,value2|
             if value1 == value2
-              # matching[key1] ||= []
-              # matching[key1] << key2
 
               row1 = table1._get_internal_join(key1,{})
               row2 = table2._get_internal_join(key2,{})
-
-              # puts row1.inspect
-              # puts row2.inspect
 
               join_output[join_key] ||= {}
 
@@ -159,28 +155,107 @@ EOF
             break
           end
         end
-
-        all_columns = all_columns.uniq
-        # puts all_columns.inspect
-
-        all_columns.unshift('ROW')
-        # puts all_columns.inspect
-
-        # puts join_output.inspect
-
-        format_rows(join_output, all_columns)
-
-        @end_time = Time.now
-
-
-
-        # scanner1 = table1._get_scanner(scan1)
-        # scanner2 = table2._get_scanner(scan2)
-
-        # puts "scanners created"
         
-        # admin.join_tables()
+        [join_output,all_columns]
+      end
 
+
+      def hash_join(table1,table2,limit)
+        hash_table1 = {}
+        table1.each do |key, value|
+          hash_value = murmur_hash3(value)
+          hash_table1[hash_value] ||= []
+          hash_table1[hash_value] << key
+        end
+  
+        join_output = {}
+        join_key = 1
+
+        table2.each do |key2, value|
+          hash_value = murmur_hash3(value)
+          if hash_table1[hash_value]
+            hash_table1[hash_value].each do |table1_key|
+
+              row1 = table1._get_internal_join(table1_key,{})
+              row2 = table2._get_internal_join(key2,{})
+
+              join_output[join_key] ||= {}
+
+              row1.each do |column,value|
+                join_output[join_key][column] = value
+              end
+
+              row2.each do |column,value|
+                join_output[join_key][column] = value
+              end
+
+              all_columns.concat(row1.keys | row2.keys)
+              if join_key == limit
+                break
+              else
+                join_key += 1
+              end
+            end
+          end
+        end
+
+        [join_output,all_columns]
+      end
+
+      def murmur_hash3(key, seed = 0)
+        c1 = 0xcc9e2d51
+        c2 = 0x1b873593
+        r1 = 15
+        r2 = 13
+        m = 5
+        n = 0xe6546b64
+      
+        length = key.bytesize
+        hash_value = seed
+      
+        key.bytes.each_slice(4) do |slice|
+          k = slice.pack('C*').unpack1('L<')
+      
+          k *= c1
+          k &= 0xffffffff
+          k = (k << r1) | (k >> (32 - r1))
+          k &= 0xffffffff
+          k *= c2
+          k &= 0xffffffff
+      
+          hash_value ^= k
+          hash_value = ((hash_value << r2) | (hash_value >> (32 - r2))) * m + n
+          hash_value &= 0xffffffff
+        end
+      
+        tail = key.byteslice(length & ~3, length & 3)
+        unless tail.empty?
+          if tail.bytesize >= 3
+            hash_value ^= tail[2].ord << 16
+          end
+          if tail.bytesize >= 2
+            hash_value ^= tail[1].ord << 8
+          end
+          if tail.bytesize >= 1
+            hash_value ^= tail[0].ord
+          end
+          hash_value *= c1
+          hash_value &= 0xffffffff
+          hash_value ^= hash_value >> 16
+          hash_value *= c2
+          hash_value &= 0xffffffff
+        end
+      
+        hash_value ^= length
+        hash_value ^= hash_value >> 16
+        hash_value *= 0x85ebca6b
+        hash_value &= 0xffffffff
+        hash_value ^= hash_value >> 13
+        hash_value *= 0xc2b2ae35
+        hash_value &= 0xffffffff
+        hash_value ^= hash_value >> 16
+      
+        hash_value
       end
 
       def format_rows(join_output, all_columns)
