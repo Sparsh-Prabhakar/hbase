@@ -86,6 +86,15 @@ EOF
         params2["COLUMNS"] = params["ON"]
         params1["FILTER"] = params["FILTER1"]
         params2["FILTER"] = params["FILTER2"]
+
+        puts params.inspect
+
+        limit = params['LIMIT'] || -1
+
+        puts limit
+
+        # params1["LIMIT"] = params["LIMIT"]
+        # params2["LIMIT"] = params["LIMIT"]
         # params1 = { "COLUMNS" => params["ON"]}
         scan1 = table1._hash_to_scan(params1)
         scan2 = table2._hash_to_scan(params2)
@@ -105,16 +114,21 @@ EOF
         res1 = table1._scan_internal_join(params1, scan1)
         res2 = table2._scan_internal_join(params1, scan2)
 
+        # puts params1.inspect
+        # puts res1.inspect
+
         join_output = {}
         all_columns = []
 
         join_key = 1
 
+        break_loop = false
+
         res1.each do |key1,value1|
           res2.each do |key2,value2|
             if value1 == value2
-              matching[key1] ||= []
-              matching[key1] << key2
+              # matching[key1] ||= []
+              # matching[key1] << key2
 
               row1 = table1._get_internal_join(key1,{})
               row2 = table2._get_internal_join(key2,{})
@@ -133,8 +147,16 @@ EOF
               end
 
               all_columns.concat(row1.keys | row2.keys)
-              join_key += 1              
+              if join_key == limit
+                break_loop = true
+                break
+              else
+                join_key += 1
+              end
             end
+          end
+          if break_loop == true
+            break
           end
         end
 
@@ -146,6 +168,23 @@ EOF
 
         # puts join_output.inspect
 
+        format_rows(join_output, all_columns)
+
+        @end_time = Time.now
+
+
+
+        # scanner1 = table1._get_scanner(scan1)
+        # scanner2 = table2._get_scanner(scan2)
+
+        # puts "scanners created"
+        
+        # admin.join_tables()
+
+      end
+
+      def format_rows(join_output, all_columns)
+        
         formatter.header(all_columns)
 
         join_output.each do |join_key,columns_hash|
@@ -160,17 +199,6 @@ EOF
           formatter.row(row_data)
           # puts "Key: #{key}, Value: #{value}"
         end
-
-        @end_time = Time.now
-
-
-
-        # scanner1 = table1._get_scanner(scan1)
-        # scanner2 = table2._get_scanner(scan2)
-
-        # puts "scanners created"
-        
-        # admin.join_tables()
 
       end
 
