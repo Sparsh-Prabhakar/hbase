@@ -105,7 +105,7 @@ EOF
         res1 = table1._scan_internal_join(params1, scan1)
         res2 = table2._scan_internal_join(params1, scan2)
 
-        join_output, all_columns = nested_loop_join(res1,res2,limit)
+        join_output, all_columns = nested_loop_join(table1, table2, res1,res2,limit)
 
         all_columns = all_columns.uniq
 
@@ -117,7 +117,7 @@ EOF
 
       end
 
-      def nested_loop_join(res1,res2,limit)
+      def nested_loop_join(table1, table2,res1,res2,limit)
         join_output = {}
         all_columns = []
 

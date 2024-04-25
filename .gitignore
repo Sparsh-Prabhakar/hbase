@@ -29,3 +29,11 @@ conf/hbase-env.sh
 conf/hbase-site.xml
 file:/*
 .vscode
+.tmp/
+data/
+MasterData/
+oldWALs/
+WALs/
+.lastflushedseqids
+hbase.id
+hbase.version
