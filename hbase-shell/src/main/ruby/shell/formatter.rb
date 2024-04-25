@@ -105,10 +105,10 @@ module Shell
           end
         else
           # Print a space to set off multi-column rows
-          print ' '
+          print '            '
           first = true
           for e in args
-            @out.print ' ' unless first
+            @out.print '            ' unless first
             first = false
             @out.print e
           end
