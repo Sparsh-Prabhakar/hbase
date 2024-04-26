@@ -87,25 +87,16 @@ EOF
         params1["FILTER"] = params["FILTER1"]
         params2["FILTER"] = params["FILTER2"]
 
-        puts params.inspect
-
         limit = params['LIMIT'] || -1
-
-        puts limit
-
-        # params1["LIMIT"] = params["LIMIT"]
-        # params2["LIMIT"] = params["LIMIT"]
-        # params1 = { "COLUMNS" => params["ON"]}
         scan1 = table1._hash_to_scan(params1)
         scan2 = table2._hash_to_scan(params2)
-        puts "Scans created"
 
         @start_time = Time.now
 
         res1 = table1._scan_internal_join(params1, scan1)
         res2 = table2._scan_internal_join(params1, scan2)
 
-        join_output, all_columns = nested_loop_join(table1, table2, res1,res2,limit)
+        join_output, all_columns =  hash_join(table1, table2, res1[params["ON"]], res2[params["ON"]], limit)
 
         all_columns = all_columns.uniq
 
@@ -115,6 +106,39 @@ EOF
 
         @end_time = Time.now
 
+      end
+
+      def table_size_ratio(table1, table2, params = {})
+        count1 = count(table1, params)
+        count2 = count(table2, params)
+        count1.to_f / count2
+      end
+
+      def check_join_column_type(table1, table2,params = {})
+        return 'string'
+      end
+
+      def get_data_selectivty(table1,table2,params = {})
+        return 1.5
+      end
+
+
+
+      def vote_for_joins(table1,table2,params={})
+        hash_join = 0
+        nested_loop_join = 0
+
+        if table_size_ratio(table1 ,table2 ,params).between?(0.5,2)
+          hash_join+=1
+        else
+          nested_loop_join +=1
+
+        if check_join_column_type == 'string'
+          nested_loop_join +=1
+        else
+          hash_join += 1
+        
+        return "hash" ? hash_join > nested_loop_join : 'nested'
       end
 
       def nested_loop_join(table1, table2,res1,res2,limit)
@@ -160,18 +184,22 @@ EOF
       end
 
 
-      def hash_join(table1,table2,limit)
+      def hash_join(table1, table2, res1, res2, limit)
         hash_table1 = {}
-        table1.each do |key, value|
+
+        join_output = {}
+        all_columns = []
+
+        res1.each do |key, value|
           hash_value = murmur_hash3(value)
           hash_table1[hash_value] ||= []
           hash_table1[hash_value] << key
         end
   
-        join_output = {}
+        # join_output = {}
         join_key = 1
 
-        table2.each do |key2, value|
+        res2.each do |key2, value|
           hash_value = murmur_hash3(value)
           if hash_table1[hash_value]
             hash_table1[hash_value].each do |table1_key|
@@ -202,7 +230,8 @@ EOF
         [join_output,all_columns]
       end
 
-      def murmur_hash3(key, seed = 0)
+      def murmur_hash3(key, seed=0)
+        # Constants for 32-bit MurmurHash3
         c1 = 0xcc9e2d51
         c2 = 0x1b873593
         r1 = 15
@@ -210,52 +239,49 @@ EOF
         m = 5
         n = 0xe6546b64
       
-        length = key.bytesize
-        hash_value = seed
-      
-        key.bytes.each_slice(4) do |slice|
-          k = slice.pack('C*').unpack1('L<')
-      
+        # Helper function to perform a single mix
+        mix = lambda do |h, k|
           k *= c1
-          k &= 0xffffffff
           k = (k << r1) | (k >> (32 - r1))
-          k &= 0xffffffff
           k *= c2
-          k &= 0xffffffff
       
-          hash_value ^= k
-          hash_value = ((hash_value << r2) | (hash_value >> (32 - r2))) * m + n
-          hash_value &= 0xffffffff
+          h ^= k
+          h = ((h << r2) | (h >> (32 - r2))) * m + n
+      
+          h
         end
       
-        tail = key.byteslice(length & ~3, length & 3)
-        unless tail.empty?
-          if tail.bytesize >= 3
-            hash_value ^= tail[2].ord << 16
-          end
-          if tail.bytesize >= 2
-            hash_value ^= tail[1].ord << 8
-          end
-          if tail.bytesize >= 1
-            hash_value ^= tail[0].ord
-          end
-          hash_value *= c1
-          hash_value &= 0xffffffff
-          hash_value ^= hash_value >> 16
-          hash_value *= c2
-          hash_value &= 0xffffffff
+        # Hash initialization
+        length = key.length
+        h = seed
+        chunk_size = 4
+        remainder = length % chunk_size
+        ending = length - remainder
+      
+        # Mix 4-byte chunks
+        (0...ending).step(chunk_size) do |i|
+          chunk = key[i, chunk_size]
+          chunk_int = chunk.unpack("V").first
+          h = mix.call(h, chunk_int)
         end
       
-        hash_value ^= length
-        hash_value ^= hash_value >> 16
-        hash_value *= 0x85ebca6b
-        hash_value &= 0xffffffff
-        hash_value ^= hash_value >> 13
-        hash_value *= 0xc2b2ae35
-        hash_value &= 0xffffffff
-        hash_value ^= hash_value >> 16
+        # Handle the remaining bytes
+        if remainder > 0
+          chunk = key[ending..-1] + "\x00" * (4 - remainder) # Pad remaining bytes with zeroes
+          chunk_int = chunk.unpack("V").first
+          h ^= chunk_int
+          h *= c1
+        end
       
-        hash_value
+        # Finalize hash
+        h ^= length
+        h ^= (h >> 16)
+        h *= 0x85ebca6b
+        h ^= (h >> 13)
+        h *= 0xc2b2ae35
+        h ^= (h >> 16)
+      
+        h & 0xFFFFFFFF
       end
 
       def format_rows(join_output, all_columns)
