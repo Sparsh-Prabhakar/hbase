@@ -818,8 +818,9 @@ EOF
           if block_given?
             yield(key, "column=#{formatted_column}, #{cell}")
           else
-            res[key] ||= {}
-            res[key] = cell
+            res[column] ||= {}
+            res[column][key] ||= {}
+            res[column][key] = cell
           end
         end
         # One more row processed

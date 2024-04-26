@@ -82,8 +82,7 @@ EOF
         # puts params
         params1 = {}
         params2 = {}
-        params1["COLUMNS"] = params["ON"]
-        params2["COLUMNS"] = params["ON"]
+        # params1["COLUMNS"] = params["ON"]
         params1["FILTER"] = params["FILTER1"]
         params2["FILTER"] = params["FILTER2"]
 
@@ -94,9 +93,13 @@ EOF
         @start_time = Time.now
 
         res1 = table1._scan_internal_join(params1, scan1)
-        res2 = table2._scan_internal_join(params1, scan2)
+        res2 = table2._scan_internal_join(params2, scan2)
 
         join_output, all_columns =  hash_join(table1, table2, res1[params["ON"]], res2[params["ON"]], limit)
+        puts res2.inspect
+        puts res1.inspect
+
+        join_output, all_columns = nested_loop_join(table1, table2, res1,res2,limit, params['ON'])
 
         all_columns = all_columns.uniq
 
@@ -141,42 +144,52 @@ EOF
         return "hash" ? hash_join > nested_loop_join : 'nested'
       end
 
-      def nested_loop_join(table1, table2,res1,res2,limit)
+      def nested_loop_join(table1, table2,res1,res2,limit, on_condition)
         join_output = {}
         all_columns = []
+
+        column = table1.get_all_columns()
+
+        puts column.inspect
 
         join_key = 1
 
         break_loop = false
 
-        res1.each do |key1,value1|
-          res2.each do |key2,value2|
-            if value1 == value2
+        join_indexes = []
 
-              row1 = table1._get_internal_join(key1,{})
-              row2 = table2._get_internal_join(key2,{})
-
-              join_output[join_key] ||= {}
-
-              row1.each do |column,value|
-                join_output[join_key][column] = value
-              end
-
-              row2.each do |column,value|
-                join_output[join_key][column] = value
-              end
-
-              all_columns.concat(row1.keys | row2.keys)
-              if join_key == limit
-                break_loop = true
-                break
-              else
-                join_key += 1
+        for col1 in res1.keys
+          for col2 in res2.keys
+            if col1 == col2
+              for row1 in res1[col1].keys
+                for row2 in res2[col2].keys 
+                  if res1[col1][row1] == res2[col2][row2]
+                    
+                    join_indexes.push([row1, row2])
+                  end
+                end
               end
             end
           end
-          if break_loop == true
+        end
+
+        all_columns.concat(res1.keys | res2.keys)
+        
+        for index_list in join_indexes
+          join_output[join_key] ||= {}
+
+          for key in res1.keys
+            join_output[join_key][key] = res1[key][index_list[0]]
+          end
+
+          for key in res2.keys
+            join_output[join_key][key] = res2[key][index_list[1]]
+          end
+          
+          if join_key == limit
             break
+          else
+            join_key += 1
           end
         end
         
