@@ -125,8 +125,6 @@ EOF
         return 1.5
       end
 
-
-
       def vote_for_joins(table1,table2,params={})
         hash_join = 0
         nested_loop_join = 0
@@ -135,11 +133,13 @@ EOF
           hash_join+=1
         else
           nested_loop_join +=1
+        end
 
         if check_join_column_type == 'string'
           nested_loop_join +=1
         else
           hash_join += 1
+        end
         
         return "hash" ? hash_join > nested_loop_join : 'nested'
       end
@@ -371,4 +371,4 @@ EOF
 end
 
 # Add the method table.count that calls count.count
-# ::Hbase::Table.add_shell_command('jointable')
+# ::Hbase::Table.add_shell_co mmand('jointable')
