@@ -86,6 +86,9 @@ EOF
         params1["FILTER"] = params["FILTER1"]
         params2["FILTER"] = params["FILTER2"]
 
+        # puts params1.keys.length
+        # puts params2.inspect
+
         limit = params['LIMIT'] || -1
         scan1 = table1._hash_to_scan(params1)
         scan2 = table2._hash_to_scan(params2)
@@ -95,17 +98,22 @@ EOF
         res1 = table1._scan_internal_join(params1, scan1)
         res2 = table2._scan_internal_join(params2, scan2)
 
-        join_output, all_columns =  hash_join(table1, table2, res1[params["ON"]], res2[params["ON"]], limit)
-        puts res2.inspect
-        puts res1.inspect
 
-        join_output, all_columns = nested_loop_join(table1, table2, res1,res2,limit, params['ON'])
+        if res1.length == 0 || res2.length == 0
+          puts "No matching rows in two tables"
+        else
+          join_output, all_columns =  hash_join(table1, table2, res1[params["ON"]], res2[params["ON"]], limit)
+          # puts res2.inspect
+          # puts res1.inspect
 
-        all_columns = all_columns.uniq
+          join_output, all_columns = nested_loop_join(table1, table2, res1,res2,limit, params['ON'])
 
-        all_columns.unshift('ROW')
+          all_columns = all_columns.uniq
 
-        format_rows(join_output, all_columns)
+          all_columns.unshift('ROW')
+
+          format_rows(join_output, all_columns, params)
+        end
 
         @end_time = Time.now
 
@@ -147,10 +155,6 @@ EOF
       def nested_loop_join(table1, table2,res1,res2,limit, on_condition)
         join_output = {}
         all_columns = []
-
-        column = table1.get_all_columns()
-
-        puts column.inspect
 
         join_key = 1
 
@@ -297,21 +301,61 @@ EOF
         h & 0xFFFFFFFF
       end
 
-      def format_rows(join_output, all_columns)
-        
-        formatter.header(all_columns)
+      def order_join_output(join_output, order_by_column)
+        final_list = {}
+        key_value_pairs = []
+        for key in join_output.keys
+          key_value_pairs.push([key, join_output[key][order_by_column]])
+        end
 
-        join_output.each do |join_key,columns_hash|
-          row_data = []
-          all_columns.each do |column_name|
-            if column_name == 'ROW'
-              row_data << join_key
-            else
-              row_data << columns_hash[column_name]
-            end
+        sorted_list = key_value_pairs.sort_by {|list| list[1]}
+
+        puts "Sorted List " + sorted_list.inspect
+
+        count = 0
+
+        for list in sorted_list
+          final_list[count] = join_output[list[0]]
+          count = count + 1
+        end
+
+        puts "Final List " + final_list.inspect
+
+        return final_list
+      end
+
+      def format_rows(join_output, all_columns, params={})
+
+        final_ordered_join_output = join_output
+        error = 0
+
+        if params['ORDER BY']
+          if all_columns.include?(params['ORDER BY'])
+            puts params['ORDER BY']
+            sorted_list = order_join_output(join_output, params['ORDER BY'])
+            puts "Sorted list " + sorted_list.inspect
+            join_output = sorted_list
+          else
+            puts "Column " + params['ORDER BY'] + " not present."
+            error = 1
           end
-          formatter.row(row_data)
-          # puts "Key: #{key}, Value: #{value}"
+        end
+        
+        if error == 0
+          formatter.header(all_columns)
+
+          join_output.each do |join_key,columns_hash|
+            row_data = []
+            all_columns.each do |column_name|
+              if column_name == 'ROW'
+                row_data << join_key
+              else
+                row_data << columns_hash[column_name]
+              end
+            end
+            formatter.row(row_data)
+            # puts "Key: #{key}, Value: #{value}"
+          end
         end
 
       end
@@ -372,3 +416,6 @@ end
 
 # Add the method table.count that calls count.count
 # ::Hbase::Table.add_shell_co mmand('jointable')
+
+
+# jointable 'class', 'student', {'ON' => 'data:name', 'FILTER1' => "SingleColumnValueFilter('data', 'course_taken', =, 'binary:Deep Learning')"}
