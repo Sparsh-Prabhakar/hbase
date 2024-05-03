@@ -99,14 +99,14 @@ EOF
         if res1.length == 0 || res2.length == 0
           puts "No matching rows in two tables"
         else
-          join_type = vote_for_joins(table1, table2,res1, res2, params1,params2)
+          join_type = vote_for_joins(table1, table2,res1[params["ON"]], res2[params["ON"]], params1,params2)
           
           if join_type == 'hash'
             join_output, all_columns =  hash_join(table1, table2, res1[params["ON"]], res2[params["ON"]], limit)
           else
-            join_output, all_columns = nested_loop_join(table1, table2, res1,res2,limit, params['ON'])
+            join_output, all_columns = nested_loop_join(table1, table2, res1 ,res2,limit, params['ON'])
           end
-          
+
           all_columns = all_columns.uniq
 
           all_columns.unshift('ROW')
@@ -124,18 +124,33 @@ EOF
         count1.to_f / count2
       end
 
-      def check_join_column_type(table1, table2,params1 = {}, params2 = {})
+      def check_join_column_type(table1, table2, res1, res2, params1 = {}, params2 = {})
+
+        dtype = 'int'
+        res1.each do |key, value|
+          if not (!!Integer(value) rescue false)
+            return dtype
+          end
+        end
+
+        res2.each do |key, value|
+          if not (!!Integer(value) rescue false)
+            return dtype
+          end
+        end
+
         return 'string'
       end
 
       def get_data_selectivty(table1,table2, res1, res2, params1 = {},params2 = {})
+  
         unique_table1 = res1.keys.uniq.length
         unique_table2 = res2.keys.uniq.length
 
         total1 = res1.keys.length
         total2 = res2.keys.length
 
-        return total1/unique_table1 , total1/unique_table1
+        return [total1.to_f / unique_table1 , total2.to_f / unique_table2]
       end
 
       def vote_for_joins(table1, table2, res1, res2, params1={},params2={})
@@ -148,7 +163,15 @@ EOF
           nested_loop_join +=1
         end
 
-        if check_join_column_type(table1 ,table2 ,params1, params2) == 'string'
+        if check_join_column_type(table1 ,table2, res1, res2, params1, params2) == 'string'
+          nested_loop_join +=1
+        else
+          hash_join += 1
+        end
+
+        selectivity1, selectivity2 = get_data_selectivty(table1, table2, res1, res2, params1, params2)
+
+        if selectivity1 > 2 and selectivity2 > 2
           nested_loop_join +=1
         else
           hash_join += 1
