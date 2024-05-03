@@ -312,8 +312,8 @@ EOF
 
         sorted_list = key_value_pairs.sort_by {|list| list[1]}
 
-        puts reverse
-        puts reverse.class
+        puts reversed
+        puts reversed.class
 
         if reversed == 'desc'
           sorted_list = sorted_list.reverse
@@ -339,12 +339,12 @@ EOF
         if params['ORDER BY']
           if all_columns.include?(params['ORDER BY'])
             puts params['ORDER BY']
-            if params['REVERSED']
-              sorted_list = order_join_output(join_output, params['ORDER BY'], params['REVERSED'])
+            if params['REVERSE']
+              sorted_list = order_join_output(join_output, params['ORDER BY'], params['REVERSE'])
               puts "Sorted list " + sorted_list.inspect
               join_output = sorted_list
             else
-              puts "Mention the REVERSED value"
+              puts "Mention the REVERSE value"
               error = 1
             end
           else
