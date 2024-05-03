@@ -104,52 +104,99 @@ EOF
         if res1.length == 0 || res2.length == 0
           puts "No matching rows in two tables"
         else
-          join_output, all_columns =  hash_join(table1, table2, res1[params["ON"]], res2[params["ON"]], limit)
-          # puts res2.inspect
-          # puts res1.inspect
-
-          join_output, all_columns = nested_loop_join(table1, table2, res1,res2,limit, params['ON'])
+          res1[params["ON"]] ||= {}
+          res2[params["ON"]] ||= {}
+          join_type = vote_for_joins(table1, table2,res1[params["ON"]], res2[params["ON"]], params1,params2)
+          
+          if join_type == 'hash'
+            join_output, all_columns =  hash_join(table1, table2, res1[params["ON"]], res2[params["ON"]], limit)
+          else
+            join_output, all_columns = nested_loop_join(table1, table2, res1 ,res2,limit, params['ON'])
+          end
 
           all_columns = all_columns.uniq
+          
+          if params['PROJECT']
+            # puts params['PROJECT']
+            all_columns = all_columns & params['PROJECT']
+            # puts all_columns
+          end
 
-          all_columns.unshift('ROW')
-
-          format_rows(join_output, all_columns, params)
+          if all_columns.length == 0
+            puts 'No columns present in output of query from', params['PROJECT']
+          else
+            all_columns.unshift('ROW')
+            format_rows(join_output, all_columns, params)
+          end
+          
         end
 
         @end_time = Time.now
 
       end
 
-      def table_size_ratio(table1, table2, params = {})
-        count1 = count(table1, params)
-        count2 = count(table2, params)
+      def table_size_ratio(table1, table2, params1 = {}, params2 = {})
+        count1 = count(table1, params1)
+        count2 = count(table2, params2)
         count1.to_f / count2
       end
 
-      def check_join_column_type(table1, table2,params = {})
+      def check_join_column_type(table1, table2, res1, res2, params1 = {}, params2 = {})
+
+
+        dtype = 'int'
+        res1.each do |key, value|
+          if not (!!Integer(value) rescue false)
+            return dtype
+          end
+        end
+
+        res2.each do |key, value|
+          if not (!!Integer(value) rescue false)
+            return dtype
+          end
+        end
+
         return 'string'
       end
 
-      def get_data_selectivty(table1,table2,params = {})
-        return 1.5
+      def get_data_selectivty(table1,table2, res1, res2, params1 = {},params2 = {})
+  
+        unique_table1 = res1.keys.uniq.length
+        unique_table2 = res2.keys.uniq.length
+
+        total1 = res1.keys.length
+        total2 = res2.keys.length
+
+        return [total1.to_f / unique_table1 , total2.to_f / unique_table2]
       end
 
-      def vote_for_joins(table1,table2,params={})
+      def vote_for_joins(table1, table2, res1={}, res2={}, params1={},params2={})
         hash_join = 0
         nested_loop_join = 0
 
-        if table_size_ratio(table1 ,table2 ,params).between?(0.5,2)
+        if table_size_ratio(table1 ,table2 ,params1,params2).between?(0.5,2)
           hash_join+=1
         else
           nested_loop_join +=1
         end
 
-        if check_join_column_type == 'string'
+        if check_join_column_type(table1 ,table2, res1, res2, params1, params2) == 'string'
           nested_loop_join +=1
         else
           hash_join += 1
         end
+
+        selectivity1, selectivity2 = get_data_selectivty(table1, table2, res1, res2, params1, params2)
+
+        if selectivity1 > 2 and selectivity2 > 2
+          nested_loop_join +=1
+        else
+          hash_join += 1
+        end
+
+        puts "Hash join votes: ", hash_join
+        puts "Nested loop join votes: ", nested_loop_join
         
         return "hash" ? hash_join > nested_loop_join : 'nested'
       end
@@ -312,14 +359,9 @@ EOF
 
         sorted_list = key_value_pairs.sort_by {|list| list[1]}
 
-        puts reversed
-        puts reversed.class
-
         if reversed == 'desc'
           sorted_list = sorted_list.reverse
         end
-
-        puts "Sorted List " + sorted_list.inspect
 
         count = 0
 
@@ -327,8 +369,6 @@ EOF
           final_list[count] = join_output[list[0]]
           count = count + 1
         end
-
-        puts "Final List " + final_list.inspect
 
         return final_list
       end
@@ -338,10 +378,8 @@ EOF
 
         if params['ORDER BY']
           if all_columns.include?(params['ORDER BY'])
-            puts params['ORDER BY']
             if params['REVERSE']
               sorted_list = order_join_output(join_output, params['ORDER BY'], params['REVERSE'])
-              puts "Sorted list " + sorted_list.inspect
               join_output = sorted_list
             else
               puts "Mention the REVERSE value"
