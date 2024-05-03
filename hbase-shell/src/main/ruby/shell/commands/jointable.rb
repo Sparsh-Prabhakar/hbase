@@ -99,6 +99,8 @@ EOF
         if res1.length == 0 || res2.length == 0
           puts "No matching rows in two tables"
         else
+          res1[params["ON"]] ||= {}
+          res2[params["ON"]] ||= {}
           join_type = vote_for_joins(table1, table2,res1[params["ON"]], res2[params["ON"]], params1,params2)
           
           if join_type == 'hash'
@@ -125,6 +127,7 @@ EOF
       end
 
       def check_join_column_type(table1, table2, res1, res2, params1 = {}, params2 = {})
+
 
         dtype = 'int'
         res1.each do |key, value|
@@ -153,7 +156,7 @@ EOF
         return [total1.to_f / unique_table1 , total2.to_f / unique_table2]
       end
 
-      def vote_for_joins(table1, table2, res1, res2, params1={},params2={})
+      def vote_for_joins(table1, table2, res1={}, res2={}, params1={},params2={})
         hash_join = 0
         nested_loop_join = 0
 
