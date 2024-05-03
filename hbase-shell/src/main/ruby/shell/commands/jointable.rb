@@ -86,6 +86,8 @@ EOF
         params1["FILTER"] = params["FILTER1"]
         params2["FILTER"] = params["FILTER2"]
 
+        # puts params['COLUMNS'].class
+
         # puts params1.keys.length
         # puts params2.inspect
 
@@ -301,7 +303,7 @@ EOF
         h & 0xFFFFFFFF
       end
 
-      def order_join_output(join_output, order_by_column)
+      def order_join_output(join_output, order_by_column, reversed)
         final_list = {}
         key_value_pairs = []
         for key in join_output.keys
@@ -309,6 +311,13 @@ EOF
         end
 
         sorted_list = key_value_pairs.sort_by {|list| list[1]}
+
+        puts reverse
+        puts reverse.class
+
+        if reversed == 'desc'
+          sorted_list = sorted_list.reverse
+        end
 
         puts "Sorted List " + sorted_list.inspect
 
@@ -325,16 +334,19 @@ EOF
       end
 
       def format_rows(join_output, all_columns, params={})
-
-        final_ordered_join_output = join_output
         error = 0
 
         if params['ORDER BY']
           if all_columns.include?(params['ORDER BY'])
             puts params['ORDER BY']
-            sorted_list = order_join_output(join_output, params['ORDER BY'])
-            puts "Sorted list " + sorted_list.inspect
-            join_output = sorted_list
+            if params['REVERSED']
+              sorted_list = order_join_output(join_output, params['ORDER BY'], params['REVERSED'])
+              puts "Sorted list " + sorted_list.inspect
+              join_output = sorted_list
+            else
+              puts "Mention the REVERSED value"
+              error = 1
+            end
           else
             puts "Column " + params['ORDER BY'] + " not present."
             error = 1
@@ -342,15 +354,31 @@ EOF
         end
         
         if error == 0
-          formatter.header(all_columns)
+
+          if params['COLUMNS']
+            params['COLUMNS'].push('ROW')
+            formatter.header(params['COLUMNS'])
+          else
+            formatter.header(all_columns)
+          end
 
           join_output.each do |join_key,columns_hash|
             row_data = []
             all_columns.each do |column_name|
-              if column_name == 'ROW'
-                row_data << join_key
+              if params['COLUMNS']
+                if params['COLUMNS'].include?(column_name)
+                  if column_name == 'ROW'
+                    row_data << join_key
+                  else
+                    row_data << columns_hash[column_name]
+                  end
+                end
               else
-                row_data << columns_hash[column_name]
+                if column_name == 'ROW'
+                  row_data << join_key
+                else
+                  row_data << columns_hash[column_name]
+                end
               end
             end
             formatter.row(row_data)
