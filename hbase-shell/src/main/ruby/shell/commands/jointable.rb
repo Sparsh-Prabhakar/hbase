@@ -110,10 +110,20 @@ EOF
           end
 
           all_columns = all_columns.uniq
+          
+          if params['PROJECT']
+            # puts params['PROJECT']
+            all_columns = all_columns & params['PROJECT']
+            # puts all_columns
+          end
 
-          all_columns.unshift('ROW')
-
-          format_rows(join_output, all_columns, params)
+          if all_columns.length == 0
+            puts 'No columns present in output of query from', params['PROJECT']
+          else
+            all_columns.unshift('ROW')
+            format_rows(join_output, all_columns, params)
+          end
+          
         end
 
         @end_time = Time.now
@@ -365,9 +375,9 @@ EOF
 
         if params['ORDER BY']
           if all_columns.include?(params['ORDER BY'])
-            puts params['ORDER BY']
+            # puts params['ORDER BY']
             sorted_list = order_join_output(join_output, params['ORDER BY'])
-            puts "Sorted list " + sorted_list.inspect
+            # puts "Sorted list " + sorted_list.inspect
             join_output = sorted_list
           else
             puts "Column " + params['ORDER BY'] + " not present."
