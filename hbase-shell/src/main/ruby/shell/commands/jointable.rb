@@ -95,12 +95,16 @@ EOF
         res1 = table1._scan_internal_join(params1, scan1)
         res2 = table2._scan_internal_join(params2, scan2)
 
-        join_output, all_columns =  hash_join(table1, table2, res1[params["ON"]], res2[params["ON"]], limit)
-        puts res2.inspect
-        puts res1.inspect
 
-        join_output, all_columns = nested_loop_join(table1, table2, res1,res2,limit, params['ON'])
 
+        join_type = vote_for_joins(table1, table2,res1, res2, params1,params2)
+
+        if join_type == 'hash'
+          join_output, all_columns =  hash_join(table1, table2, res1[params["ON"]], res2[params["ON"]], limit)
+        else
+          join_output, all_columns = nested_loop_join(table1, table2, res1,res2,limit, params['ON'])
+        end
+        
         all_columns = all_columns.uniq
 
         all_columns.unshift('ROW')
@@ -111,35 +115,44 @@ EOF
 
       end
 
-      def table_size_ratio(table1, table2, params = {})
-        count1 = count(table1, params)
-        count2 = count(table2, params)
+      def table_size_ratio(table1, table2, params1 = {}, params2 = {})
+        count1 = count(table1, params1)
+        count2 = count(table2, params2)
         count1.to_f / count2
       end
 
-      def check_join_column_type(table1, table2,params = {})
+      def check_join_column_type(table1, table2,params1 = {}, params2 = {})
         return 'string'
       end
 
-      def get_data_selectivty(table1,table2,params = {})
-        return 1.5
+      def get_data_selectivty(table1,table2, res1, res2, params1 = {},params2 = {})
+        unique_table1 = res1.keys.uniq.length
+        unique_table2 = res2.keys.uniq.length
+
+        total1 = res1.keys.length
+        total2 = res2.keys.length
+
+        return total1/unique_table1 , total1/unique_table1
       end
 
-      def vote_for_joins(table1,table2,params={})
+      def vote_for_joins(table1, table2, res1, res2, params1={},params2={})
         hash_join = 0
         nested_loop_join = 0
 
-        if table_size_ratio(table1 ,table2 ,params).between?(0.5,2)
+        if table_size_ratio(table1 ,table2 ,params1,params2).between?(0.5,2)
           hash_join+=1
         else
           nested_loop_join +=1
         end
 
-        if check_join_column_type == 'string'
+        if check_join_column_type(table1 ,table2 ,params1, params2) == 'string'
           nested_loop_join +=1
         else
           hash_join += 1
         end
+
+        puts "Hash join votes: ", hash_join
+        puts "Nested loop join votes: ", nested_loop_join
         
         return "hash" ? hash_join > nested_loop_join : 'nested'
       end
